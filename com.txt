@@ -1,0 +1,14 @@
+python scripts/reinforcement_learning/rsl_rl/play.py --task Isaac-Repose-Cube-Allegro-Direct-v0 --num_envs 32 --use_pretrained_checkpoint
+
+
+
+scripts/reinforcement_learning/rsl_rl/train.py --task Isaac-Repose-Cube-Allegro-Direct-v0 --num_envs 64 --max_iterations 1000
+
+
+python scripts/reinforcement_learning/rsl_rl/train.py --task Isaac-Repose-Cube-Shadow-Direct-v0 --num_envs 4096 --max_iterations 20000 --headless
+ 
+ 
+python scripts/reinforcement_learning/rsl_rl/play.py --task Isaac-Repose-Cube-Shadow-Direct-v0 --num_envs 16 --checkpoint logs/rsl_rl/shadow_hand/2025-03-31_02-15-17/model_3999.pt --video --video_length 1000
+
+
+tensorboard --logdir=logs/rsl_rl/shadow_hand/2025-04-01_17-39-55
