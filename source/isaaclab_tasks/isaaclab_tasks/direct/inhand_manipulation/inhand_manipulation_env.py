@@ -31,6 +31,7 @@ class InHandManipulationEnv(DirectRLEnv):
 
         self.num_hand_dofs = self.hand.num_joints
 
+        self.success_time_buf = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         # buffers for position targets
         self.hand_dof_targets = torch.zeros((self.num_envs, self.num_hand_dofs), dtype=torch.float, device=self.device)
         self.prev_targets = torch.zeros((self.num_envs, self.num_hand_dofs), dtype=torch.float, device=self.device)
@@ -163,6 +164,10 @@ class InHandManipulationEnv(DirectRLEnv):
             self.cfg.fall_dist,
             self.cfg.fall_penalty,
             self.cfg.av_factor,
+            self.hand_dof_vel,
+            self.object_linvel,
+            self.success_time_buf,  # Pass success_time_buf
+            self.cfg.min_success_time,  # Pass min_success_time
         )
 
         if "log" not in self.extras:
@@ -241,7 +246,7 @@ class InHandManipulationEnv(DirectRLEnv):
 
         self.hand.set_joint_position_target(dof_pos, env_ids=env_ids)
         self.hand.write_joint_state_to_sim(dof_pos, dof_vel, env_ids=env_ids)
-
+        self.success_time_buf[env_ids] = 0
         self.successes[env_ids] = 0
         self._compute_intermediate_values()
 
@@ -395,6 +400,15 @@ def compute_rewards(
     fall_dist: float,
     fall_penalty: float,
     av_factor: float,
+    #new added rewards by XiheShao
+    
+    #episode_length_buf: torch.Tensor,
+    hand_dof_vel: torch.Tensor,
+    object_linvel: torch.Tensor,
+    success_time_buf: torch.Tensor,  # Buffer to track success time
+    min_success_time: float,         # Minimum time to keep success conditions
+
+
 ):
 
     goal_dist = torch.norm(object_pos - target_pos, p=2, dim=-1)
@@ -405,12 +419,31 @@ def compute_rewards(
 
     action_penalty = torch.sum(actions**2, dim=-1)
 
+    # Encourage upward wrist velocity
+    wrist_velocity = hand_dof_vel[:, :2]  # Get wrist joint velocities
+    wrist_up_reward = torch.sum(wrist_velocity * 1, dim=-1)
+
+    # Reward for cube's upward linear velocity
+    cube_up_velocity = torch.clamp(object_linvel[:, 2], min=0.0)  # Only reward upward movement
+    cube_velocity_reward_scale = 2.0  # Scale for cube velocity reward
+    wrist_up_reward += cube_up_velocity * cube_velocity_reward_scale
+
     # Total reward is: position distance + orientation alignment + action regularization + success bonus + fall penalty
-    reward = dist_rew + rot_rew + action_penalty * action_penalty_scale
+    reward = dist_rew + rot_rew + action_penalty * action_penalty_scale + wrist_up_reward
 
     # Find out which envs hit the goal and update successes count
-    goal_resets = torch.where(torch.abs(rot_dist) <= success_tolerance, torch.ones_like(reset_goal_buf), reset_goal_buf)
+    success_condition = (torch.abs(rot_dist) <= success_tolerance)& (torch.abs(goal_dist)<0.5)
+    goal_resets = torch.where(success_condition, torch.ones_like(reset_goal_buf), reset_goal_buf)
     successes = successes + goal_resets
+
+    # # Update success time buffer
+    # success_condition = (torch.abs(rot_dist) <= success_tolerance)
+    # reward = torch.where(success_condition, reward + 5, reward) #pass bouns for success pass the point.
+    # success_time_buf = torch.where(success_condition, success_time_buf + 1, torch.zeros_like(success_time_buf))
+
+    # # Check if success time exceeds the minimum threshold
+    # goal_resets = torch.where(success_time_buf >= min_success_time, torch.ones_like(reset_goal_buf), reset_goal_buf)
+    # successes = successes + goal_resets
 
     # Success bonus: orientation is within `success_tolerance` of goal orientation
     reward = torch.where(goal_resets == 1, reward + reach_goal_bonus, reward)
