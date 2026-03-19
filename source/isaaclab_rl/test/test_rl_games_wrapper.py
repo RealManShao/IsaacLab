@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -14,12 +14,14 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import os
+
 import gymnasium as gym
+import pytest
 import torch
 
 import carb
 import omni.usd
-import pytest
 
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 
@@ -31,12 +33,17 @@ from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 
 @pytest.fixture(scope="module")
 def registered_tasks():
+    # disable interactive mode for wandb for automate environments
+    os.environ["WANDB_DISABLED"] = "true"
     # acquire all Isaac environments names
     registered_tasks = list()
     for task_spec in gym.registry.values():
         if "Isaac" in task_spec.id:
             cfg_entry_point = gym.spec(task_spec.id).kwargs.get("rl_games_cfg_entry_point")
             if cfg_entry_point is not None:
+                # skip automate environments as they require cuda installation
+                if "assembly" in task_spec.id.lower():
+                    continue
                 registered_tasks.append(task_spec.id)
     # sort environments by name
     registered_tasks.sort()
